@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: jumptotech-banking
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/jumptotech_banking}
+    username: ${DB_USERNAME:jumptotech_dev}
+    password: ${DB_PASSWORD:jumptotech_dev_local_only}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+banking:
+  seed:
+    enabled: ${SEED_DEMO_DATA:false}
+    admin-email: ${ADMIN_SEED_EMAIL:}
+    admin-password: ${ADMIN_SEED_PASSWORD:}
+    sarah-password: ${SEED_SARAH_PASSWORD:}
+    michael-password: ${SEED_MICHAEL_PASSWORD:}
+  security:
+    session-cookie-secure: ${APP_SESSION_COOKIE_SECURE:false}
+  login:
+    max-failed-attempts: 5
+    lockout-duration-minutes: 15
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    com.jumptotech.banking: INFO

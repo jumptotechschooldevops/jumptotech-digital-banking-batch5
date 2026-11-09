@@ -7,7 +7,7 @@ ever created by Flyway.
 
 All monetary values are stored as `BIGINT` cents (`amount_cents`,
 `balance_cents`). No `NUMERIC`/`FLOAT` money anywhere, by rule. Currency is
-a fixed `CHAR(3)` = `'USD'` for v1 but stored explicitly so a future
+a fixed `VARCHAR(3)` = `'USD'` for v1 but stored explicitly so a future
 multi-currency version isn't a schema migration surprise.
 
 All primary keys are `UUID` (`gen_random_uuid()`, from the `pgcrypto`
@@ -34,7 +34,7 @@ idempotency_records (standalone, keyed by idempotency_key)
 | Column                | Type           | Notes                                      |
 |-----------------------|----------------|---------------------------------------------|
 | id                    | UUID PK        | `gen_random_uuid()`                         |
-| email                 | CITEXT UNIQUE  | case-insensitive unique                     |
+| email                 | TEXT UNIQUE    | app normalizes to lowercase before every write/read, so a plain unique column gives case-insensitive uniqueness without the citext extension |
 | password_hash         | TEXT           | Argon2id hash, never logged                  |
 | role                  | TEXT           | `CUSTOMER` or `ADMIN`, CHECK constraint      |
 | status                | TEXT           | `ACTIVE`, `LOCKED`, `DISABLED`, CHECK        |
@@ -71,7 +71,7 @@ Indexes: unique on `email`.
 | account_number    | TEXT UNIQUE NOT NULL | full internal number, e.g. 10 digits; **frontend only ever sees a masked form** (`****1234`), computed in the DTO layer, never stored masked |
 | account_type      | TEXT NOT NULL  | `CHECKING` or `SAVINGS`, CHECK constraint          |
 | balance_cents     | BIGINT NOT NULL DEFAULT 0 CHECK (balance_cents >= 0) | never negative |
-| currency          | CHAR(3) NOT NULL DEFAULT 'USD' |                                    |
+| currency          | VARCHAR(3) NOT NULL DEFAULT 'USD' |                                    |
 | status            | TEXT NOT NULL DEFAULT 'ACTIVE' | `ACTIVE`, `FROZEN`, `CLOSED`, CHECK |
 | created_at        | TIMESTAMPTZ NOT NULL DEFAULT now() |                                |
 | updated_at        | TIMESTAMPTZ NOT NULL DEFAULT now() |                                |
@@ -91,7 +91,7 @@ guarantees it even if application logic has a bug.
 | source_account_id      | UUID NOT NULL REFERENCES accounts(id) |                       |
 | destination_account_id | UUID NOT NULL REFERENCES accounts(id) |                       |
 | amount_cents           | BIGINT NOT NULL CHECK (amount_cents > 0) |                      |
-| currency               | CHAR(3) NOT NULL DEFAULT 'USD' |                                 |
+| currency               | VARCHAR(3) NOT NULL DEFAULT 'USD' |                                 |
 | description            | TEXT NULL     |                                                |
 | status                 | TEXT NOT NULL | `PENDING`, `COMPLETED`, `FAILED`, CHECK        |
 | failure_reason         | TEXT NULL     | populated only when status = FAILED            |

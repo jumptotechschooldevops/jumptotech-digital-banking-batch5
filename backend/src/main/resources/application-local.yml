@@ -1,0 +1,7 @@
+banking:
+  seed:
+    enabled: true
+
+logging:
+  level:
+    com.jumptotech.banking: DEBUG
