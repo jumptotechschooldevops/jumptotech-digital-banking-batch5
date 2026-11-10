@@ -1,19 +1,19 @@
 package com.jumptotech.banking;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.HttpCookieHandling;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
+import org.springframework.boot.restclient.RestTemplateBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.http.*;
-import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -39,6 +39,8 @@ import java.util.stream.Collectors;
  * database out from under every subsequent subclass sharing this base.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureTestRestTemplate
+@Import(AbstractIntegrationTest.TestHttpClientConfig.class)
 public abstract class AbstractIntegrationTest {
 
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(DockerImageName.parse("postgres:16-alpine"));
@@ -63,17 +65,26 @@ public abstract class AbstractIntegrationTest {
      * route, which would silently throttle the concurrency tests below the
      * parallelism they're trying to prove out. This raises that cap for the
      * test client only - unrelated to anything the production app ships.
+     *
+     * Cookie handling is also explicitly disabled: Spring Boot 4's
+     * TestRestTemplate otherwise manages cookies itself by default (so one
+     * shared TestRestTemplate behaves like one shared browser cookie jar),
+     * but every {@link Session} below already tracks its own cookie jar
+     * explicitly to simulate an independent browser session. Leaving the
+     * client's own cookie handling on would auto-attach cookies from
+     * whichever session queried it last, bleeding session/CSRF state across
+     * supposedly-independent sessions.
      */
     @TestConfiguration
     static class TestHttpClientConfig {
         @Bean
         RestTemplateBuilder restTemplateBuilder() {
-            PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
-            connectionManager.setMaxTotal(50);
-            connectionManager.setDefaultMaxPerRoute(50);
-            CloseableHttpClient httpClient = HttpClients.custom().setConnectionManager(connectionManager).build();
-            HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory(httpClient);
-            return new RestTemplateBuilder().requestFactory(() -> factory);
+            return new RestTemplateBuilder()
+                    .requestFactoryBuilder(ClientHttpRequestFactoryBuilder.httpComponents()
+                            .withConnectionManagerCustomizer(connectionManager -> connectionManager
+                                    .setMaxConnTotal(50)
+                                    .setMaxConnPerRoute(50)))
+                    .cookieHandling(HttpCookieHandling.DISABLE);
         }
     }
 
@@ -82,6 +93,15 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     protected TestRestTemplate restTemplate;
+
+    @org.junit.jupiter.api.BeforeEach
+    void disableTestRestTemplateCookieJar() {
+        // See the note on TestHttpClientConfig above: the RestTemplateBuilder-level
+        // cookieHandling(DISABLE) does not reliably stick once
+        // @AutoConfigureTestRestTemplate builds the actual TestRestTemplate, so
+        // disable it again here, directly on the bean this test instance will use.
+        restTemplate = restTemplate.withCookieHandling(HttpCookieHandling.DISABLE);
+    }
 
     @Autowired
     protected ObjectMapper objectMapper;

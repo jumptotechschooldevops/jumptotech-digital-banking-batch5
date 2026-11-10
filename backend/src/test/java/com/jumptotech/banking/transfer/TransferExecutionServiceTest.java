@@ -1,7 +1,5 @@
 package com.jumptotech.banking.transfer;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.jumptotech.banking.account.Account;
 import com.jumptotech.banking.account.AccountService;
 import com.jumptotech.banking.account.AccountStatus;
@@ -19,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.UUID;
@@ -51,7 +50,7 @@ class TransferExecutionServiceTest {
     @BeforeEach
     void setUp() {
         service = new TransferExecutionService(accountService, transferRepository, ledgerService,
-                idempotencyRecordRepository, auditService, new ObjectMapper().registerModule(new JavaTimeModule()));
+                idempotencyRecordRepository, auditService, new ObjectMapper());
 
         userId = UUID.randomUUID();
         source = new Account(userId, "1000000001", AccountType.CHECKING);

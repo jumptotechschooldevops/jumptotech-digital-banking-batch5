@@ -1,6 +1,6 @@
 package com.jumptotech.banking.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.jumptotech.banking.common.web.ApiError;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;

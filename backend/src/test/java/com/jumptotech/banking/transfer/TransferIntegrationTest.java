@@ -1,6 +1,6 @@
 package com.jumptotech.banking.transfer;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import com.jumptotech.banking.AbstractIntegrationTest;
 import com.jumptotech.banking.account.Account;
 import com.jumptotech.banking.account.AccountRepository;
@@ -85,7 +85,7 @@ class TransferIntegrationTest extends AbstractIntegrationTest {
                 Map.of("sourceAccountId", checking, "destinationAccountId", savings, "amountCents", 50_000),
                 UUID.randomUUID().toString());
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(json(response).get("error").asText()).isEqualTo("INSUFFICIENT_FUNDS");
 
         Account checkingAfter = accountRepository.findById(checking).orElseThrow();
@@ -154,7 +154,7 @@ class TransferIntegrationTest extends AbstractIntegrationTest {
                 Map.of("sourceAccountId", accountIds.get(0), "destinationAccountId", accountIds.get(1), "amountCents", 1_000),
                 UUID.randomUUID().toString());
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
         assertThat(json(response).get("error").asText()).isEqualTo("DESTINATION_ACCOUNT_INELIGIBLE");
     }
 

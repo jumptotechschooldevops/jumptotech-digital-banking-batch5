@@ -1,6 +1,6 @@
 package com.jumptotech.banking.account;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import com.jumptotech.banking.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;

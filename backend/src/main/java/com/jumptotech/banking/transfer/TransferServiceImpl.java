@@ -1,6 +1,6 @@
 package com.jumptotech.banking.transfer;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import com.jumptotech.banking.account.Account;
 import com.jumptotech.banking.account.AccountService;
 import com.jumptotech.banking.common.exception.ForbiddenOperationException;
