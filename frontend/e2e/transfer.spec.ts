@@ -32,8 +32,12 @@ test("login, view balances, transfer funds, and see it in history", async ({ pag
   await page.getByRole("link", { name: "Transfer" }).click();
   await expect(page).toHaveURL(/\/transfer/);
 
-  await page.getByLabel(/from account/i).selectOption({ label: /CHECKING/ });
-  await page.getByLabel(/to account/i).selectOption({ label: /SAVINGS/ });
+  const fromSelect = page.getByLabel(/from account/i);
+  const toSelect = page.getByLabel(/to account/i);
+  const checkingValue = await fromSelect.locator("option", { hasText: "CHECKING" }).getAttribute("value");
+  const savingsValue = await toSelect.locator("option", { hasText: "SAVINGS" }).getAttribute("value");
+  await fromSelect.selectOption(checkingValue!);
+  await toSelect.selectOption(savingsValue!);
   await page.getByLabel(/amount/i).fill("25.00");
   await page.getByRole("button", { name: /review transfer/i }).click();
 

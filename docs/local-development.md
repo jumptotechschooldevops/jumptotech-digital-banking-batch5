@@ -2,12 +2,13 @@
 
 ## Status
 
-Backend (Stage 2) and frontend (Stage 3) are both implemented and build/test
-clean on this machine as of their respective stages. Sections 1-6 below have
-all been run and verified. Section 7 (a full manual transfer walkthrough with
-both servers running together against the dev database) and the Playwright
-end-to-end test in section 8 are **not yet verified** — that full-stack
-integration pass is Stage 4/5 work.
+Backend (Stage 2), frontend (Stage 3), and full-stack integration (Stage 4)
+are all implemented and verified on this machine. Every section below,
+including the manual transfer walkthrough and the Playwright end-to-end test,
+has actually been run against the real dev PostgreSQL database with both
+servers up. Stage 5 (the complete, final test-suite pass with everything
+documented together) is still to come, though both suites already pass
+individually as part of Stage 4's verification.
 
 ## Prerequisites (verified on this machine)
 
@@ -112,29 +113,36 @@ creates:
 
 It will refuse to run unless `SPRING_PROFILES_ACTIVE` is `local` or `dev`.
 
-## 7. Logging in and testing a transfer *(Stage 4, not yet verified)*
+## 7. Logging in and testing a transfer
+
+Verified on this machine (Stage 4), both via the running UI and via direct
+API calls through the frontend's proxy:
 
 1. Open `http://localhost:5173/login`.
 2. Log in as Sarah Johnson (demo credentials from the seed step).
-3. Dashboard should show both account balances and recent transactions.
+3. Dashboard shows both account balances and recent transactions.
 4. Go to Transfer, choose checking → savings, enter an amount, confirm.
-5. Confirm the receipt shows updated balances, and the transaction history
-   page reflects both the debit and the credit.
+5. The receipt shows updated balances, and the transaction history page
+   reflects both the debit and the credit - confirmed against the database
+   directly (`ledger_entries` carries a balanced DEBIT/CREDIT pair, `accounts`
+   shows the new balances).
 
 ## 8. Running the test suites
 
 ```bash
-cd backend && ./mvnw test                 # unit + Testcontainers integration tests - 46/46 passing (Stage 2)
-cd frontend && npm run build               # tsc -b && vite build - verified clean (Stage 3)
-cd frontend && npm run test               # Vitest + React Testing Library - 13/13 passing (Stage 3)
-cd frontend && npm run test:e2e           # Playwright - requires both servers running; not yet run (Stage 4/5)
+cd backend && ./mvnw test                 # unit + Testcontainers integration tests - 46/46 passing
+cd frontend && npm run build               # tsc -b && vite build - verified clean
+cd frontend && npm run test               # Vitest + React Testing Library - 13/13 passing
+cd frontend && npm run test:e2e           # Playwright - 1/1 passing against the live stack
 ```
 
-For the Playwright suite specifically, start the backend with a known seed
-password so the test can log in:
+For the Playwright suite, start the backend with a known seed password so
+the test can log in (never commit the value you choose):
 
 ```bash
-SEED_DEMO_DATA=true SEED_SARAH_PASSWORD='choose-a-local-password' ./mvnw spring-boot:run
+SPRING_PROFILES_ACTIVE=local SEED_DEMO_DATA=true SEED_SARAH_PASSWORD='choose-a-local-password' ./mvnw spring-boot:run
 # in another terminal:
-SEED_SARAH_PASSWORD='choose-a-local-password' npm run test:e2e
+npm run dev
+# in a third terminal, after installing browsers once with `npx playwright install chromium`:
+SEED_SARAH_PASSWORD='choose-a-local-password' npx playwright test
 ```
