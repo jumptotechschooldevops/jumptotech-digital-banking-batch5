@@ -1,0 +1,19 @@
+# Documented, justified exceptions to the backend's blocking Trivy gate (see
+# .github/workflows/ci.yml). This file is empty by default - the backend
+# dependency tree is currently clean of known HIGH/CRITICAL findings.
+#
+# Add an exception only when a HIGH/CRITICAL finding genuinely cannot be
+# remediated immediately (no fixed version yet, or a fix requires a breaking
+# change tracked separately) AND it has been reviewed and approved. Each
+# entry must document:
+#   - the CVE/advisory ID
+#   - why it doesn't apply or can't be fixed yet
+#   - who approved it and when
+#   - a review/expiry date so it doesn't silently become permanent
+#
+# Example:
+# CVE-2025-00000 exp:2026-06-30
+# # Transitive via spring-boot-starter-foo; no fixed version upstream yet.
+# # Not reachable: the vulnerable code path (XML entity expansion) is never
+# # invoked by this app's JSON-only API. Approved by <name> on 2026-01-15,
+# # re-review before expiry.
