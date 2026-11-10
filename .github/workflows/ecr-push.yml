@@ -2,75 +2,81 @@
 name: Build and Push Docker Images to ECR
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
-  actions: read
   id-token: write
-
-concurrency:
-  group: ecr-publish-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   publish:
-    name: Build and Push to AWS ECR
+    name: Docker Build and Push to ECR
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout successful CI commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
 
-      - name: Wait for successful CI on this commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          for attempt in $(seq 1 60); do
-            result=$(gh api \
-              "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&per_page=20" \
-              --jq '[.workflow_runs[] |
-                select(.head_sha == env.SHA)] |
-                sort_by(.created_at) | last |
-                [.status, .conclusion] | @tsv')
-
-            status=$(echo "$result" | cut -f1)
-            conclusion=$(echo "$result" | cut -f2)
-
-            if [ "$status" = "completed" ]; then
-              if [ "$conclusion" = "success" ]; then
-                echo "CI passed."
-                exit 0
-              fi
-              echo "CI did not pass: $conclusion"
-              exit 1
-            fi
-
-            echo "Waiting for CI: attempt $attempt"
-            sleep 20
-          done
-
-          echo "Timed out waiting for CI."
-          exit 1
-
-      - name: Verify Dockerfiles exist
+      - name: Verify Dockerfiles
         run: |
           test -f backend/Dockerfile
           test -f frontend/Dockerfile
+          echo "Both Dockerfiles found"
 
-      - name: Configure AWS credentials with OIDC
+      - name: Diagnose GitHub OIDC identity
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          import json
+          import base64
+          import urllib.request
+          import urllib.parse
+
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
+          token = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+
+          separator = "&" if "?" in url else "?"
+          url += separator + urllib.parse.urlencode({
+              "audience": "sts.amazonaws.com"
+          })
+
+          request = urllib.request.Request(
+              url,
+              headers={"Authorization": "Bearer " + token}
+          )
+
+          with urllib.request.urlopen(request) as response:
+              jwt = json.load(response)["value"]
+
+          payload = jwt.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+
+          for key in ("iss", "aud", "sub", "repository",
+                      "ref", "event_name"):
+              print(f"{key}: {claims.get(key)}")
+          PY
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::668484272259:role/JumpToTech-Banking-ECR-Push-Policy
           aws-region: us-east-2
-          role-session-name: GitHubActionsECRPush
+          role-to-assume: arn:aws:iam::668484272259:role/JumpToTech-Banking-ECR-Push-Policy
+          role-session-name: JumpToTechECR
+          retry-max-attempts: 1
 
       - name: Verify AWS identity
         run: aws sts get-caller-identity
@@ -79,31 +85,32 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set image tag
+      - name: Set Docker image tag
         id: image
-        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push backend
+      - name: Build and push backend image
         uses: docker/build-push-action@v6
         with:
           context: ./backend
           file: ./backend/Dockerfile
-          push: true
           platforms: linux/amd64
+          push: true
           tags: |
             ${{ steps.ecr.outputs.registry }}/jumptotech-banking-backend:${{ steps.image.outputs.tag }}
             ${{ steps.ecr.outputs.registry }}/jumptotech-banking-backend:latest
 
-      - name: Build and push frontend
+      - name: Build and push frontend image
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
-          push: true
           platforms: linux/amd64
+          push: true
           tags: |
             ${{ steps.ecr.outputs.registry }}/jumptotech-banking-frontend:${{ steps.image.outputs.tag }}
             ${{ steps.ecr.outputs.registry }}/jumptotech-banking-frontend:latest
