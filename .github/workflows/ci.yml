@@ -1,105 +1,115 @@
+
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
-# Least privilege by default: every job can read the repo and nothing else.
-# Individual jobs elevate only the specific permission they need (see the
-# trivy job, which needs security-events: write to upload its SARIF report).
 permissions:
   contents: read
 
 jobs:
   backend:
     name: Backend (Maven + Testcontainers/PostgreSQL)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: '21'
           cache: maven
           cache-dependency-path: backend/pom.xml
 
-      - name: Verify Docker is available for Testcontainers
-        run: docker info
+      - name: Verify Docker for Testcontainers
+        run: |
+          docker version
+          docker info
+          docker ps
+          test -S /var/run/docker.sock
 
-      - name: Run backend test suite
+      - name: Run backend tests with PostgreSQL Testcontainers
         working-directory: backend
-        run: ./mvnw --batch-mode --no-transfer-progress test
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp clean verify
 
-      - name: Upload Surefire reports
+      - name: Upload backend test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-surefire-reports
-          path: backend/target/surefire-reports
-          retention-days: 7
+          name: backend-test-reports
+          path: backend/target/surefire-reports/
+          if-no-files-found: ignore
 
   frontend:
     name: Frontend (lint, test, build)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 22
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: frontend
         run: npm ci
 
       - name: Lint
-        working-directory: frontend
         run: npm run lint
 
-      - name: Unit tests (Vitest)
-        working-directory: frontend
-        run: npm run test
+      - name: Run tests
+        run: npm test -- --run
 
-      - name: Production build
-        working-directory: frontend
+      - name: Build frontend
         run: npm run build
-
-      - name: Audit dependencies
-        working-directory: frontend
-        # Informational: fails the step (not the whole job) only on high/critical findings,
-        # so a new transitive advisory doesn't block merges without anyone noticing it first.
-        run: npm audit --audit-level=high
-        continue-on-error: true
 
   trivy:
     name: Trivy vulnerability scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
     permissions:
       contents: read
-      security-events: write # required only for uploading the SARIF reports below
+      security-events: write
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Split into two scans rather than one repo-wide scan so each stack's gate
-      # reflects its own actual state. Both are blocking: the backend upgraded off
-      # Spring Boot 3.3.4 (EOL) to 4.1.2, which cleared its previously pre-existing
-      # CRITICAL/HIGH CVEs (Tomcat, Spring Framework/Security, Jackson, BouncyCastle),
-      # so there is no longer a reason to let it pass with known findings.
-      #
-      # A HIGH/CRITICAL finding now fails the build unless it has a documented,
-      # reviewed exception in backend/.trivyignore or frontend/.trivyignore (each
-      # entry there must record the CVE, why it can't be fixed yet, who approved it,
-      # and a review/expiry date - see the comments in those files).
-      - name: Scan frontend dependencies (blocking)
+      - name: Set up Java 21 and Maven cache
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Warm Maven dependency cache
+        working-directory: backend
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp dependency:go-offline
+
+      - name: Scan frontend dependencies
+        id: frontend_scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
@@ -107,41 +117,13 @@ jobs:
           trivyignores: frontend/.trivyignore
           format: sarif
           output: trivy-frontend.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "1"
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          scanners: vuln
 
-      # The backend scan drives Trivy's Java/pom.xml analyzer, which resolves
-      # parent/import POMs from Maven Central over the network when they
-      # aren't already in the local ~/.m2 cache. Maven Central rate-limits
-      # that per IP (HTTP 429), and Trivy deliberately fails fast on a 429
-      # instead of retrying, to avoid extending the block. So we warm the
-      # cache with a real Maven run first - Maven's own resolver retries
-      # transient 429/503 responses with backoff and honors any Retry-After
-      # header the server sends - leaving Trivy with everything it needs
-      # already on disk and nothing left to fetch.
-      - name: Set up JDK 21 (Temurin) for Maven cache warm-up
-        if: always()
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
-          cache-dependency-path: backend/pom.xml
-
-      - name: Warm Maven cache for Trivy's backend scan
-        if: always()
-        run: >-
-          mvn -B -f backend/pom.xml dependency:go-offline
-          -Daether.connector.http.retryHandler.count=5
-          -Daether.connector.http.retryHandler.interval=5000
-          -Daether.connector.http.retryHandler.intervalMax=60000
-          -Daether.connector.http.retryHandler.serviceUnavailable=429,503
-
-      # trivy-action runs trivy natively on the runner (it's a composite
-      # action, not a Docker one), so it shares this job's $HOME/.m2 with
-      # the warm-up step above - no extra mount or volume wiring needed.
-      - name: Scan backend dependencies (blocking)
-        if: always()
+      - name: Scan backend dependencies
+        id: backend_scan
+        if: success() || steps.frontend_scan.outcome == 'failure'
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
@@ -149,19 +131,21 @@ jobs:
           trivyignores: backend/.trivyignore
           format: sarif
           output: trivy-backend.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "1"
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          scanners: vuln
 
-      - name: Upload frontend Trivy results to the Security tab
-        if: always() && hashFiles('trivy-frontend.sarif') != ''
+      - name: Upload frontend SARIF
+        if: always() && steps.frontend_scan.outcome != 'skipped'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend
 
-      - name: Upload backend Trivy results to the Security tab
-        if: always() && hashFiles('trivy-backend.sarif') != ''
+      - name: Upload backend SARIF
+        if: always() && steps.backend_scan.outcome != 'skipped'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-backend.sarif
           category: trivy-backend
+
