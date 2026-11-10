@@ -100,7 +100,7 @@ jobs:
       # entry there must record the CVE, why it can't be fixed yet, who approved it,
       # and a review/expiry date - see the comments in those files).
       - name: Scan frontend dependencies (blocking)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: frontend
@@ -112,7 +112,7 @@ jobs:
 
       - name: Scan backend dependencies (blocking)
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           scan-type: fs
           scan-ref: backend
