@@ -1,0 +1,1669 @@
+# JumpToTech Digital Banking
+
+Production-Grade DevOps, DevSecOps, SRE, Kubernetes and GitOps Engineering Lab
+
+Batch 5
+
+Advanced Capstone
+
+AWS + Kubernetes
+
+Project: JumpToTech Digital Banking Platform\
+Industry: Financial Services / Digital Banking\
+Primary role: DevOps / Cloud / Platform Engineer\
+Supporting roles: SRE, Backend, Frontend, DBA, Security, QA, Network and Compliance\
+Architecture: AWS, Java Spring Boot, React, PostgreSQL, Docker, Amazon ECR, Amazon EKS, Terraform, Helm, Argo CD, Prometheus and Grafana
+
+This lab will take students from a developer's source code to a production-style banking platform, including infrastructure provisioning, secure CI/CD, Kubernetes deployments, database connectivity, monitoring, incident response and disaster recovery.
+
+It will also teach students how to explain their engineering decisions during real DevOps and SRE interviews.
+
+Important distinction: We have already built and tested significant portions of the banking application and CI pipeline. The full EKS, GitOps, Aurora, security and observability architecture below is the target implementation for the extended lab, not a claim that every component has already been deployed. The application is a simulated banking system using fictional accounts and transactions, not a regulated production bank.
+
+## 1. Executive project overview
+
+Imagine you have joined a financial technology company as a DevOps Engineer.
+
+The company is launching a new digital banking application that allows customers to authenticate securely, view their accounts, transfer money between eligible accounts, review transaction histories and manage administrative operations.
+
+The backend developers have implemented the banking business logic using Java and Spring Boot. Frontend developers have built a React application. Your responsibility is to establish the infrastructure and delivery platform that allows the application to operate reliably, securely and continuously.
+
+The business requirements are:
+
+- Banking transactions must not be lost or processed twice.
+- Application changes must be tested and security-scanned before deployment.
+- Production workloads must be resilient to individual Pod and node failures.
+- Database access must be restricted to authorized application components.
+- Every deployment must be traceable and reversible.
+- Critical incidents must generate actionable alerts.
+- The system must support auditing, backup, recovery and access control.
+
+A production banking platform also requires formal threat modeling, risk assessments, compliance controls and operational approvals. This lab demonstrates engineering patterns but does not by itself establish PCI DSS, SOC 2 or other regulatory compliance.
+
+## 2. End-to-end production architecture
+
+Reference AWS banking architecture
+
+Banking customers
+
+Web browser / HTTPS
+
+Route 53 → CloudFront → AWS WAF
+
+DNS, TLS, CDN, edge protection
+
+Application Load Balancer
+
+HTTPS listener / Kubernetes Ingress rules
+
+Frontend
+
+Nginx + React
+
+Deployment → ClusterIP Service
+
+Banking API
+
+Spring Boot / Java 21
+
+Deployment → ClusterIP Service
+
+Private database tier
+
+Amazon Aurora PostgreSQL or Amazon RDS PostgreSQL
+
+Multi-AZ · Encryption · Backups · Restricted Security Groups
+
+Platform operations
+
+EKS · Helm · Argo CD · ECR · Terraform
+
+Security and SRE
+
+IAM · Secrets · NetworkPolicy · Prometheus · Grafana
+
+The architecture has two separate paths:
+
+Application traffic: Customer → HTTPS → load balancer → Kubernetes Service → healthy application Pod → database.
+
+Software delivery: Developer → GitHub → CI → ECR → GitOps repository → Argo CD → Helm → EKS.
+
+Students must understand both paths. A successful CI pipeline does not necessarily mean a successful deployment, and a running Pod does not necessarily mean the banking application is healthy.
+
+## 3. The engineering team: who does what?
+
+A DevOps Engineer does not develop and operate a banking platform alone. The project requires a cross-functional team with clearly defined ownership.
+
+| Team member                | Primary responsibility                              | DevOps collaboration                    |
+| -------------------------- | --------------------------------------------------- | --------------------------------------- |
+| Product Manager            | Business requirements and release priorities        | Release readiness                       |
+| Solution Architect         | System architecture and nonfunctional requirements  | AWS and EKS design                      |
+| Backend Engineer           | Banking APIs, transfers, ledger, authentication     | Docker, database, runtime configuration |
+| Frontend Engineer          | Customer portal and API integration                 | Build pipeline, CDN, ingress            |
+| DevOps / Platform Engineer | Infrastructure, CI/CD, GitOps, Kubernetes           | All engineering teams                   |
+| SRE                        | Reliability, SLOs, incidents, capacity              | Monitoring, scaling, recovery           |
+| DBA                        | PostgreSQL performance, schema, backup, replication | RDS/Aurora, migrations                  |
+| Security Engineer          | IAM, threat modeling, vulnerability management      | OIDC, RBAC, scanning, secrets           |
+| QA Engineer                | Automated and integration testing                   | CI quality gates                        |
+| Network Engineer           | VPC, DNS, connectivity, firewalls                   | Ingress, routing, network isolation     |
+| Compliance / Risk          | Audit evidence, control requirements, approvals     | Traceability and evidence               |
+| Incident Commander         | Coordinates major incidents                         | Escalation and recovery                 |
+
+### What does the DevOps Engineer actually own?
+
+A typical DevOps Engineer on this project would:
+
+1. Provision AWS infrastructure using Terraform.
+2. Build secure Docker images and maintain build pipelines.
+3. Configure GitHub Actions CI and ECR publishing.
+4. Set up AWS IAM roles and GitHub OIDC authentication.
+5. Provision and operate the EKS platform with the platform team.
+6. Package Kubernetes workloads using Helm.
+7. Configure Argo CD for GitOps-based deployments.
+8. Implement ingress, service routing, network policies and Kubernetes RBAC.
+9. Integrate secrets, metrics, logging and alerting.
+10. Support application teams during releases, outages and performance investigations.
+
+The DevOps Engineer collaborates with the DBA on database connectivity and migrations, with Security on least-privilege access, and with SRE on operational readiness. Database transaction correctness remains primarily a backend and database engineering responsibility.
+
+## 4. What we have already implemented
+
+The current JumpToTech Digital Banking project includes:
+
+| Component                                      | Current evidence                            |
+| ---------------------------------------------- | ------------------------------------------- |
+| GitHub repository                              | Created and connected                       |
+| Java Spring Boot backend                       | Implemented                                 |
+| React frontend                                 | Implemented                                 |
+| PostgreSQL integration tests                   | Passing in GitHub Actions                   |
+| Frontend tests                                 | 13 passing                                  |
+| Trivy dependency scanning                      | Passing in latest shared CI run             |
+| Dockerfiles                                    | Verified by ECR workflow                    |
+| AWS ECR repositories                           | Created                                     |
+| GitHub OIDC integration                        | Configured; trust-policy mismatch diagnosed |
+| ECR image publishing                           | Not yet confirmed successful                |
+| Terraform-managed EKS                          | Planned                                     |
+| Helm and Argo CD deployment                    | Planned                                     |
+| RDS/Aurora production database                 | Planned                                     |
+| Production observability and security controls | Planned                                     |
+
+The latest shared CI run succeeded for commit `96da899`. This establishes a useful foundation, but it is only the first part of the production delivery lifecycle.
+
+## 5. Phase 1 — AWS infrastructure and networking
+
+Before deploying Kubernetes, students must understand the AWS infrastructure supporting the banking application.
+
+### 5.1 Production-style VPC design
+
+VPC: 10.20.0.0/16 — three Availability Zones
+
+AZ A
+
+Public
+
+ALB / NAT
+
+Private app
+
+EKS nodes
+
+Isolated DB
+
+RDS / Aurora
+
+AZ B
+
+Public
+
+ALB / NAT
+
+Private app
+
+EKS nodes
+
+Isolated DB
+
+RDS / Aurora
+
+AZ C
+
+Public
+
+ALB / NAT
+
+Private app
+
+EKS nodes
+
+Isolated DB
+
+RDS / Aurora
+
+A sample subnet plan:
+
+| Subnet                    | CIDR                                        | Purpose                  |
+| ------------------------- | ------------------------------------------- | ------------------------ |
+| Public A/B/C              | 10.20.0.0/24, 10.20.1.0/24, 10.20.2.0/24    | Public ALB, NAT gateways |
+| Private application A/B/C | 10.20.10.0/24, 10.20.11.0/24, 10.20.12.0/24 | EKS worker nodes         |
+| Isolated database A/B/C   | 10.20.20.0/24, 10.20.21.0/24, 10.20.22.0/24 | RDS/Aurora subnet group  |
+
+These CIDRs are illustrative. Production sizing must account for Pod IP consumption, VPC CNI prefix delegation, node scaling and future growth.
+
+### 5.2 Internet Gateway versus NAT Gateway
+
+Internet Gateway (IGW): Enables internet routing for resources with appropriate public addressing and routes. An internet-facing ALB typically resides in public subnets.
+
+NAT Gateway: Allows private workloads to initiate outbound connections without accepting unsolicited inbound internet connections.
+
+VPC endpoints: Let workloads reach services such as ECR, S3 and AWS Secrets Manager privately, reducing reliance on NAT. Private EKS designs may also need endpoints for STS, CloudWatch and other AWS APIs.
+
+The database subnets should not have an internet route merely to allow database administration.
+
+### 5.3 AWS Security Groups
+
+Example traffic policy:
+
+| Source                | Destination                | Port                 | Reason               |
+| --------------------- | -------------------------- | -------------------- | -------------------- |
+| Customer              | Public ALB                 | 443                  | HTTPS                |
+| ALB                   | EKS application targets    | App listener port    | Frontend/API traffic |
+| Backend workload      | RDS/Aurora                 | 5432                 | PostgreSQL           |
+| Authorized monitoring | Metrics endpoints          | Defined metrics port | Observability        |
+| Administrators        | AWS/EKS control interfaces | Restricted           | Operations           |
+
+Security Groups protect network interfaces. Kubernetes NetworkPolicies control permitted Pod traffic where enforced by the chosen network-policy implementation. Both layers matter.
+
+### 5.4 Terraform project structure
+
+```
+infrastructure/
+├── environments/
+│   ├── dev/
+│   ├── staging/
+│   └── prod/
+├── modules/
+│   ├── vpc/
+│   ├── eks/
+│   ├── ecr/
+│   ├── iam/
+│   ├── database/
+│   ├── kms/
+│   └── observability/
+└── README.md
+```
+
+Use separate Terraform state and AWS permissions for each environment. A production workflow should have reviewed plans, restricted applies, remote state locking and state encryption.
+
+A basic student workflow:
+
+```
+terraform fmt -recursive
+terraform init
+terraform validate
+terraform plan -out=tfplan
+terraform show tfplan
+```
+
+Apply only after reviewing the plan and confirming the selected AWS account, region, workspace and expected cost.
+
+Production interview question: Why do we use Terraform instead of creating everything manually?
+
+Answer: Terraform makes infrastructure declarative, version-controlled, reviewable and repeatable. It supports drift detection and consistent environments. It does not eliminate the need for change control or careful state management.
+
+## 6. Phase 2 — Containerization with Docker
+
+Our banking platform has two independently deployable application components.
+
+[Optimizing Docker Images for Spring Boot Apps with Multi-Stage Builds | by Aymen FARHANI | Medium](https://images.openai.com/static-rsc-4/kh6FO_oJpGC9utLaawiKJ5oe6dVwzXxBXpkz93kk-gEWH1WzDDckuLA7hMg6_fxC6_CSsQSW626oQETysdSALxi6h_tzflMyK_dRbDlM1K4JpA0XbTVm5IIPGFIXh_eX214BNPC6sKHblPofby9Dfkdt1c2wcdVyzFToA3X_CRc?purpose=inline)
+
+Backend image
+
+Java 21, Spring Boot, PostgreSQL driver and banking business logic.
+
+[⚙️ Part 2: Host Your React App & API with NGINX — Step-by-Step Guide - DEV Community](https://images.openai.com/static-rsc-4/1HOA-8Qfm5tLZSRzctkd_ZsHz7zUE9EkyAyIfAmv6b-Z-fdpeegmzRhay7GBsSVW_ahkwNCDl8trr1gpSluRo0HuPAiz7RH055jI_wt-FljbMVU4BOg3Jvl63EhhywSOyvAD7HbgnDbzIhvtc9ezFFN4FiStS2Sa5nQgOS8N8kg?purpose=inline)
+
+Frontend image
+
+React application built with Node.js and served using Nginx.
+
+### 6.1 Multi-stage Docker builds
+
+For the backend, the first stage compiles the Java application; the second stage contains only the runtime and executable JAR.
+
+For the frontend, the first stage runs `npm ci` and `npm run build`; the second serves the static files using Nginx.
+
+This reduces the final image size and avoids shipping Maven, Node build tooling and unnecessary source files into production.
+
+A production-ready Dockerfile should also consider non-root execution, image digests, minimal base images, vulnerability scanning, read-only root filesystems where supported, and predictable build outputs.
+
+### 6.2 Local Docker verification
+
+```
+cd ~/jumptotech-digital-banking
+
+docker build --platform linux/amd64 \
+  -t jumptotech-banking-backend:dev ./backend
+
+docker build --platform linux/amd64 \
+  -t jumptotech-banking-frontend:dev ./frontend
+
+docker images | grep jumptotech-banking
+```
+
+These builds validate packaging, not the full banking transaction flow. The backend still requires database connectivity, secrets and application configuration.
+
+### 6.3 Docker versus Kubernetes
+
+Docker builds and runs containers. Kubernetes schedules and manages workloads across nodes, including replicas, service discovery, health checks, rollouts and recovery.
+
+Interview question: Why not deploy a single Docker container on EC2?
+
+Answer: That can be appropriate for a small application. EKS becomes valuable when the organization needs a shared container platform with standardized scheduling, deployments, scaling, service discovery and operational controls. It also adds cost and complexity.
+
+## 7. Phase 3 — CI/CD with GitHub Actions
+
+Secure software delivery lifecycle
+
+1\. Developer commit
+
+Pull request / code review
+
+2\. CI validation
+
+Java tests + React tests
+
+3\. Security gates
+
+Trivy + secret scanning
+
+4\. Docker build
+
+Versioned images
+
+5\. AWS ECR
+
+Immutable image digest
+
+6\. GitOps change
+
+Update Helm image digest
+
+7\. Argo CD
+
+Reconcile EKS workloads
+
+8\. Verification
+
+Health + metrics + rollback
+
+### 7.1 Continuous Integration
+
+Our current CI includes:
+
+Backend: Maven, Java 21, Testcontainers and PostgreSQL integration tests.
+
+Frontend: Node.js dependency installation, ESLint, Vitest and production build.
+
+Security: Trivy dependency vulnerability scans with blocking HIGH/CRITICAL findings.
+
+For the extended lab, add:
+
+- Secret detection and software composition analysis.
+- Static application security testing (SAST).
+- Dependency and SBOM generation.
+- Container image scanning after build.
+- Infrastructure-as-code and Kubernetes manifest scanning.
+- Artifact provenance and image signing.
+- Branch protection and required code reviews.
+
+Security gates must have defined exception procedures. A security scanner reporting no findings is not proof that the application is free from vulnerabilities.
+
+### 7.2 Continuous Delivery and Continuous Deployment
+
+These terms are different.
+
+Continuous Delivery: Every successful change is prepared for release, but production promotion can require approval.
+
+Continuous Deployment: Changes that pass automated controls are deployed without manual approval.
+
+For a banking environment, a common approach is automated development and staging deployment, with controlled production promotion, risk-based approvals and automated rollback procedures.
+
+### 7.3 What happened in our actual CI troubleshooting?
+
+This is an important teaching case.
+
+| Incident                         | Root cause / finding                               | Engineering lesson                                 |
+| -------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
+| Trivy action could not resolve   | Invalid action reference                           | Pin verified action versions                       |
+| Trivy ignore files missing       | Files existed locally but not in Git               | CI only sees committed files                       |
+| Maven Central HTTP 429           | Dependency-resolution rate limiting                | Cache dependencies, avoid aggressive retries       |
+| Backend Testcontainers failed    | Docker environment could not be detected           | Validate runner and container configuration        |
+| Local Trivy clean, GitHub failed | Local Spring Boot 4.1.2 versus committed 3.3.4     | Test and scan the same commit                      |
+| AWS STS denied ECR publishing    | GitHub OIDC subject did not match IAM trust policy | Diagnose identity claims, not just IAM permissions |
+
+These examples demonstrate why a DevOps Engineer must distinguish application failures, build failures, network failures, authentication failures and security findings.
+
+## 8. Phase 4 — AWS OIDC and IAM security
+
+This is one of the most important sections in the lab.
+
+### 8.1 Why not use AWS access keys in GitHub Secrets?
+
+A traditional pipeline might store:
+
+```
+AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY
+```
+
+These are long-lived credentials unless explicitly rotated or revoked. If exposed, they may remain usable beyond the pipeline execution.
+
+With OpenID Connect (OIDC), GitHub requests a short-lived identity token. AWS validates the token and, if the IAM trust conditions match, issues temporary role credentials through AWS STS.
+
+GitHub Actions workflow
+
+Requests signed OIDC token
+
+AWS STS
+
+Validates issuer, audience, subject and role trust
+
+Temporary AWS credentials
+
+Limited permissions and lifetime
+
+Amazon ECR
+
+Push authorized container images
+
+### 8.2 Our real OIDC failure
+
+Our initial AWS trust policy expected:
+
+```
+repo:jumptotechschooldevops/jumptotech-digital-banking-batch5:ref:refs/heads/main
+```
+
+But the actual GitHub token contained:
+
+```
+repo:jumptotechschooldevops@87104292/jumptotech-digital-banking-batch5@1452025901:ref:refs/heads/main
+```
+
+This environment uses an OIDC subject containing organization and repository IDs. Because IAM `StringEquals` requires an exact match, STS rejected the request.
+
+The diagnostic claims showed:
+
+```
+iss: https://token.actions.githubusercontent.com
+aud: sts.amazonaws.com
+ref: refs/heads/main
+event_name: workflow_run
+```
+
+The solution was to align the role's trust policy with the observed subject while keeping the audience and repository/branch restriction.
+
+### 8.3 IAM trust policy versus permission policy
+
+These are two different things.
+
+Trust policy: Who may assume the role?
+
+Permission policy: What may the role do after assuming it?
+
+A successful STS role assumption does not automatically grant ECR access.
+
+The ECR publisher should have only the necessary permissions, such as repository layer upload, image push and authorization-token retrieval.
+
+It should not receive `AdministratorAccess`.
+
+### 8.4 Production security considerations
+
+For production, students must also learn to:
+
+- Restrict which repositories, branches or approved environments can assume a role.
+- Use separate roles for CI publishing, Argo CD image access and infrastructure deployment.
+- Avoid printing OIDC tokens or AWS credentials in logs.
+- Use GitHub environment protections and required reviewers.
+- Monitor CloudTrail for unexpected role assumptions.
+- Prefer immutable image digests instead of mutable `latest` tags.
+- Pin GitHub Actions to reviewed immutable commits.
+- Remove temporary OIDC diagnostic steps after verification.
+
+Interview question: What does `sts:AssumeRoleWithWebIdentity` do?
+
+Answer: It exchanges a valid externally issued web identity token, subject to an IAM role's trust policy, for temporary AWS role credentials.
+
+Interview question: Why did your ECR pipeline fail even though the IAM role existed?
+
+Answer: The role existed, but its trust policy did not match the actual GitHub OIDC token subject. We inspected the token's nonsecret claims, identified the mismatch, updated the trust relationship and reran authentication.
+
+## 9. Phase 5 — Amazon ECR and image promotion
+
+Use separate repositories:
+
+```
+jumptotech-banking-backend
+jumptotech-banking-frontend
+```
+
+The build pipeline should publish images with immutable commit-derived tags and record the resulting image digests.
+
+For example:
+
+```
+668484272259.dkr.ecr.us-east-2.amazonaws.com/
+  jumptotech-banking-backend:<commit-sha>
+```
+
+The deployed Kubernetes workload should reference a tested image digest rather than relying only on `latest`.
+
+For a stronger production design, promote the same tested image from development to staging and production. Do not rebuild different images for each environment.
+
+Also configure ECR encryption, image scanning, lifecycle policies and repository permissions.
+
+## 10. Phase 6 — Amazon EKS cluster
+
+### 10.1 What is EKS?
+
+Amazon Elastic Kubernetes Service provides a managed Kubernetes control plane. AWS operates the managed control-plane infrastructure; your team remains responsible for workload configuration, access controls, node strategy, networking, observability and application security.
+
+### 10.2 Core Kubernetes architecture
+
+Kubernetes control plane
+
+API Server · etcd · Scheduler · Controller Manager
+
+Worker 1
+
+kubelet · containerd · CNI
+
+Banking Pods
+
+Node agents
+
+Worker 2
+
+kubelet · containerd · CNI
+
+Banking Pods
+
+Node agents
+
+Worker 3
+
+kubelet · containerd · CNI
+
+Banking Pods
+
+Node agents
+
+### 10.3 Kubernetes control-plane components
+
+| Component                    | Responsibility                          |
+| ---------------------------- | --------------------------------------- |
+| API Server                   | Entry point for Kubernetes API requests |
+| etcd                         | Stores Kubernetes cluster state         |
+| Scheduler                    | Selects nodes for unscheduled Pods      |
+| Controller Manager           | Reconciles desired and observed state   |
+| kubelet                      | Manages Pods on each node               |
+| containerd                   | Runs containers                         |
+| CNI                          | Provides Pod networking                 |
+| kube-proxy or eBPF dataplane | Implements Service traffic forwarding   |
+| CoreDNS                      | Resolves Kubernetes service names       |
+
+### 10.4 Production EKS considerations
+
+Use private worker nodes distributed across Availability Zones. Configure managed node groups or an approved autoscaling solution, workload identity, audit logging, encrypted storage, Pod scheduling constraints and capacity monitoring.
+
+A three-AZ design is a resilience target, not a guarantee of zero downtime. You must test failover and confirm that the application and database can tolerate a zone failure.
+
+Basic commands:
+
+```
+aws eks update-kubeconfig \
+  --region us-east-2 \
+  --name jumptotech-banking-prod
+
+kubectl get nodes -o wide
+kubectl get pods -A
+kubectl get namespaces
+kubectl get events -A --sort-by=.lastTimestamp
+```
+
+The cluster name is illustrative; students should replace it with the actual Terraform-created cluster name.
+
+## 11. Phase 7 — Kubernetes workload objects
+
+Students must understand why each Kubernetes resource exists, not just memorize commands.
+
+| Kubernetes resource              | Banking use case                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------- |
+| Namespace                        | Separate banking, monitoring and GitOps workloads                                 |
+| Deployment                       | Run stateless frontend and backend replicas                                       |
+| ReplicaSet                       | Maintain desired Pod replicas under a Deployment                                  |
+| Pod                              | Run one or more closely coupled containers                                        |
+| ClusterIP Service                | Stable internal access to the banking API                                         |
+| NodePort Service                 | Demonstrate node-level service exposure                                           |
+| LoadBalancer Service             | Expose a service through a cloud load balancer when appropriate                   |
+| Ingress                          | Route external HTTP/HTTPS requests                                                |
+| ConfigMap                        | Nonsecret runtime configuration                                                   |
+| Secret                           | Kubernetes secret object; preferably synchronized from an external secret manager |
+| ServiceAccount                   | Workload identity                                                                 |
+| StatefulSet                      | Stateful workloads with stable identities and storage                             |
+| DaemonSet                        | Node-level logging, security and monitoring agents                                |
+| PersistentVolume / PVC           | Persistent storage for eligible workloads                                         |
+| HPA                              | Scale application replicas                                                        |
+| PDB                              | Limit voluntary disruptions                                                       |
+| NetworkPolicy                    | Restrict Pod traffic                                                              |
+| Role / RoleBinding               | Namespace-scoped Kubernetes authorization                                         |
+| ClusterRole / ClusterRoleBinding | Cluster-scoped authorization                                                      |
+
+### 11.1 Namespace
+
+```
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: banking
+  labels:
+    app.kubernetes.io/part-of: jumptotech-banking
+```
+
+Production environments should usually use separate clusters or AWS accounts where stronger isolation is required, not rely solely on namespaces.
+
+### 11.2 Backend Deployment
+
+This is a teaching manifest. It assumes that the application supports the specified Actuator health endpoints and that the ServiceAccount and secret synchronization are configured separately.
+
+```
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: banking-backend
+  namespace: banking
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: banking-backend
+  template:
+    metadata:
+      labels:
+        app: banking-backend
+    spec:
+      serviceAccountName: banking-api
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: BANKING_BACKEND_IMAGE_DIGEST
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: banking-db-credentials
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds: 20
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+
+```
+
+Before applying, validate that the Java runtime and container image work with a read-only filesystem, writable temporary directories, the configured UID and these memory settings. Use an actual ECR image digest in place of the placeholder.
+
+### 11.3 Readiness, liveness and startup probes
+
+Readiness: Can this Pod safely receive traffic?
+
+Liveness: Is the process healthy enough to keep running?
+
+Startup: Has the application completed its initial startup?
+
+For banking workloads, readiness may include selected critical dependencies, but liveness should generally not fail merely because a shared database is temporarily unavailable. Otherwise, a database outage can cause widespread application restarts.
+
+### 11.4 RollingUpdate strategy
+
+With three replicas, `maxSurge: 1` and `maxUnavailable: 0`, Kubernetes can create one additional Pod during an update while aiming to keep all three desired replicas available.
+
+This does not guarantee zero downtime. Application startup, database migrations, traffic draining and actual capacity must also be handled correctly.
+
+### 11.5 ClusterIP Service
+
+```
+apiVersion: v1
+kind: Service
+metadata:
+  name: banking-backend
+  namespace: banking
+spec:
+  type: ClusterIP
+  selector:
+    app: banking-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+```
+
+A Pod can call:
+
+```
+http://banking-backend.banking.svc.cluster.local
+```
+
+CoreDNS resolves the service name to its ClusterIP. The Kubernetes service dataplane then forwards traffic to an eligible endpoint, normally represented in EndpointSlices.
+
+### 11.6 NodePort versus ClusterIP versus LoadBalancer
+
+| Type         | What it does                                  | Typical use                    |
+| ------------ | --------------------------------------------- | ------------------------------ |
+| ClusterIP    | Exposes a Service inside the cluster          | Backend APIs                   |
+| NodePort     | Allocates a port on nodes for Service traffic | Labs or specialized networking |
+| LoadBalancer | Requests cloud load-balancer integration      | Externally exposed services    |
+
+For production banking applications, prefer a controlled ALB/Ingress design for HTTP/HTTPS rather than exposing application NodePorts directly to the public internet.
+
+### 11.7 Ingress routing
+
+Example target routing:
+
+```
+https://bank.example.com/        → frontend
+https://bank.example.com/api/*   → backend
+```
+
+An illustrative AWS ALB Ingress:
+
+```
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: banking-ingress
+  namespace: banking
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: REPLACE_WITH_ACM_CERT_ARN
+spec:
+  ingressClassName: alb
+  rules:
+    - host: bank.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: banking-backend
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: banking-frontend
+                port:
+                  number: 80
+
+```
+
+This requires the AWS Load Balancer Controller, appropriate IAM permissions, subnet discovery and a valid ACM certificate. The example domain is not an actual banking endpoint.
+
+In production, enforce HTTPS and carefully configure WAF, trusted headers, session cookies, CSRF protections and any proxy forwarding behavior.
+
+## 12. Phase 8 — DaemonSet, StatefulSet and persistent storage
+
+### 12.1 DaemonSet
+
+A DaemonSet ensures that an eligible set of nodes runs the designated agent Pods.
+
+Banking platform examples:
+
+- Fluent Bit or another node-level log collector.
+- Node metrics exporters.
+- Runtime security agents.
+- Approved network agents.
+
+A DaemonSet is not normally the correct resource for the banking business API.
+
+DaemonSet behavior
+
+Node 1
+
+Log agent
+
+Node 2
+
+Log agent
+
+Node 3
+
+Log agent
+
+One logging-agent Pod per eligible node in this illustrative cluster.
+
+### 12.2 StatefulSet
+
+A StatefulSet is useful when applications require stable Pod identities, ordered lifecycle behavior and persistent volume associations.
+
+Examples include:
+
+- A PostgreSQL instance for a classroom exercise.
+- A Kafka broker cluster managed with appropriate operational tooling.
+- Certain stateful monitoring or storage components.
+
+A StatefulSet does not automatically provide database replication, backups, automatic failover or transaction consistency.
+
+### 12.3 Should we run PostgreSQL inside EKS for banking production?
+
+For this project, the preferred production target is managed Amazon RDS or Aurora, not a manually maintained PostgreSQL StatefulSet.
+
+Students should still deploy a PostgreSQL StatefulSet in an isolated lab to understand:
+
+- Headless Services.
+- Stable Pod names such as `postgres-0`.
+- PVC creation through `volumeClaimTemplates`.
+- EBS CSI dynamic provisioning.
+- Pod rescheduling and volume attachment.
+- Backup and recovery responsibilities.
+
+This is an educational exercise, not the recommended production database architecture.
+
+### 12.4 PersistentVolume and PersistentVolumeClaim
+
+A PVC requests storage. A StorageClass defines how Kubernetes dynamically provisions it. On AWS, the EBS CSI driver can provision block volumes.
+
+Important considerations include Availability Zone placement, access modes, storage encryption, snapshots and the fact that an EBS volume does not automatically become multi-AZ storage.
+
+## 13. Phase 9 — Kubernetes NetworkPolicy
+
+For a banking platform, the principle is deny by default, then explicitly allow required traffic.
+
+### 13.1 Default deny
+
+```
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: banking
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+```
+
+This policy selects all Pods in the namespace. It only works as intended if the cluster has a network-policy enforcement implementation enabled.
+
+### 13.2 Allow frontend-to-backend traffic
+
+```
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: banking
+spec:
+  podSelector:
+    matchLabels:
+      app: banking-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: banking-frontend
+      ports:
+        - protocol: TCP
+          port: 8080
+
+```
+
+This permits frontend Pods in the same namespace to reach backend Pods on port 8080.
+
+It does not by itself allow direct ALB-to-backend traffic. For an ALB using IP targets, ingress and egress policies must be designed and tested for the actual traffic source and dataplane behavior.
+
+### 13.3 Database connectivity
+
+For RDS/Aurora outside Kubernetes, use restrictive database Security Groups. Kubernetes egress policies may also constrain database-bound traffic using CIDR-based rules or supported higher-level network controls.
+
+Be careful with IP-based policies when database endpoints can fail over or change addresses. DNS-aware policy capabilities depend on the network-policy implementation.
+
+### 13.4 DNS traffic
+
+A default-deny egress policy can also block DNS resolution. Students should create a narrowly scoped DNS egress rule permitting traffic to the actual cluster DNS service.
+
+Interview scenario: The backend Pod is Running and Ready, but database connections time out after a NetworkPolicy change.
+
+A good investigation checks NetworkPolicies, DNS, database endpoint resolution, Security Groups, routes, database health and application logs. Do not assume the Pod needs restarting.
+
+## 14. Phase 10 — Kubernetes RBAC and AWS workload identity
+
+### 14.1 RBAC
+
+Kubernetes RBAC answers:
+
+Who can perform which Kubernetes API operations on which resources?
+
+For example, a developer may be allowed to view Pods and logs in a development namespace without permission to delete workloads or read production Secrets.
+
+```
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: banking-readonly
+  namespace: banking
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+
+```
+
+Bind this Role to an authorized group or subject using a RoleBinding.
+
+### 14.2 Role versus ClusterRole
+
+A Role defines permissions within a namespace. A ClusterRole can define cluster-scoped permissions or reusable namespaced permissions.
+
+A RoleBinding grants permissions in its namespace, while a ClusterRoleBinding grants permissions at cluster scope.
+
+### 14.3 Kubernetes RBAC versus AWS IAM
+
+These are separate authorization systems.
+
+- Kubernetes RBAC: Controls Kubernetes API access.
+- AWS IAM: Controls access to AWS services such as S3, ECR and Secrets Manager.
+- EKS access management: Maps authorized AWS principals into Kubernetes access, through supported EKS access entries or other configured mechanisms.
+
+For AWS access from application Pods, use EKS Pod Identity or appropriately configured IAM Roles for Service Accounts (IRSA), not hardcoded AWS keys.
+
+The application ServiceAccount should have only the permissions it needs.
+
+## 15. Phase 11 — Banking database architecture: RDS versus Aurora
+
+This is a core interview topic.
+
+### 15.1 Amazon RDS PostgreSQL
+
+Amazon RDS for PostgreSQL is a managed PostgreSQL database service. AWS manages much of the infrastructure operation, including supported backups, patching workflows and high-availability configurations.
+
+RDS PostgreSQL is often suitable for applications that need PostgreSQL compatibility with predictable capacity and relatively straightforward database operations.
+
+### 15.2 Amazon Aurora PostgreSQL
+
+Amazon Aurora PostgreSQL-Compatible Edition is a managed relational database engine designed around Aurora's distributed storage architecture.
+
+Aurora can offer useful features for high availability, read scaling and managed failover. It is not automatically the best or cheapest choice for every workload.
+
+RDS PostgreSQL
+
+Managed PostgreSQL with instance-based storage and optional Multi-AZ configurations
+
+Aurora PostgreSQL
+
+Aurora cluster storage architecture with writer and optional reader instances
+
+### 15.3 When should we choose each?
+
+| Requirement                   | RDS PostgreSQL                                   | Aurora PostgreSQL                                        |
+| ----------------------------- | ------------------------------------------------ | -------------------------------------------------------- |
+| Small or moderate application | Often a good fit                                 | May be unnecessary                                       |
+| PostgreSQL compatibility      | Strong                                           | Strong, with engine-specific differences                 |
+| High availability             | Multi-AZ options                                 | Aurora cluster failover                                  |
+| Read scaling                  | Read replicas / supported Multi-AZ architectures | Aurora readers and reader endpoint                       |
+| Storage architecture          | RDS-managed database storage                     | Aurora distributed cluster storage                       |
+| Cost                          | Often simpler to estimate                        | Requires evaluation of compute, storage, I/O and options |
+| Operational complexity        | Familiar PostgreSQL model                        | Additional cluster and endpoint considerations           |
+
+For a student lab, start with RDS PostgreSQL if the objective is straightforward database connectivity and operations. Introduce Aurora when teaching distributed storage, reader scaling, failover and advanced managed database architecture.
+
+For a real banking system, select based on measured workload, RTO/RPO, regulatory requirements, availability objectives, feature compatibility and total cost.
+
+### 15.4 Database connection flow
+
+```
+Spring Boot backend Pod
+       |
+       | PostgreSQL protocol / TLS
+       v
+RDS Proxy (optional)
+       |
+       v
+RDS PostgreSQL or Aurora writer
+       |
+       v
+Persistent banking transaction data
+```
+
+RDS Proxy can help manage connection pooling and certain failover scenarios, but it does not solve every connection or transaction issue. Application retry behavior must be designed carefully.
+
+### 15.5 Banking transaction correctness
+
+Our backend uses PostgreSQL-backed integration tests and includes transfer, ledger and idempotency logic.
+
+For banking-style transfers, students should understand:
+
+- Database transactions and atomicity.
+- ACID guarantees.
+- Pessimistic versus optimistic locking.
+- Concurrent transfers and deadlocks.
+- Idempotency keys.
+- Ledger consistency.
+- Database constraints.
+- Retry safety.
+- Audit trails.
+
+For example, a transfer between two accounts should not debit one account without reliably applying the corresponding credit and ledger records.
+
+Interview question: Why can't Kubernetes guarantee that a banking transfer happens exactly once?
+
+Answer: Kubernetes manages workloads, not business transaction semantics. Exactly-once business effects require application-level idempotency, database constraints and transaction design, especially when requests are retried after timeouts.
+
+### 15.6 Database migrations
+
+Use a controlled migration process such as Flyway.
+
+In production, avoid having every application replica independently attempt incompatible schema changes during startup. Prefer a single controlled migration job or release stage, with backward-compatible schema changes and explicit rollback planning.
+
+For zero-downtime releases, use an expand-and-contract migration strategy:
+
+1. Add backward-compatible schema changes.
+2. Deploy application code supporting old and new structures.
+3. Migrate or backfill data safely.
+4. Remove obsolete schema elements in a later release.
+
+### 15.7 Backup and disaster recovery
+
+The database plan must include:
+
+- Automated backups and point-in-time recovery.
+- Multi-AZ availability.
+- Encryption at rest and in transit.
+- Backup retention policies.
+- Regular restore tests.
+- RTO and RPO definitions.
+- Regional disaster-recovery planning where required.
+
+RTO: Maximum acceptable time to restore service.
+
+RPO: Maximum acceptable data loss measured in time.
+
+Multi-AZ is not the same as a backup, and a backup is not proof of recoverability until restoration is tested.
+
+## 16. Phase 12 — Helm: packaging Kubernetes applications
+
+Helm helps manage Kubernetes application configurations through versioned charts.
+
+Instead of manually maintaining separate Deployment, Service, Ingress, HPA and other YAML files for every environment, we create a reusable Helm chart.
+
+### 16.1 Suggested Helm structure
+
+```
+helm/
+└── banking/
+    ├── Chart.yaml
+    ├── values.yaml
+    ├── values-dev.yaml
+    ├── values-staging.yaml
+    ├── values-prod.yaml
+    └── templates/
+        ├── deployment-backend.yaml
+        ├── deployment-frontend.yaml
+        ├── service-backend.yaml
+        ├── service-frontend.yaml
+        ├── ingress.yaml
+        ├── hpa.yaml
+        ├── networkpolicy.yaml
+        ├── serviceaccount.yaml
+        └── pdb.yaml
+```
+
+### 16.2 Example production values
+
+```
+
+backend:
+  replicaCount: 3
+  image:
+    repository: REPLACE_WITH_ECR_BACKEND
+    digest: REPLACE_WITH_IMAGE_DIGEST
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+frontend:
+  replicaCount: 3
+  image:
+    repository: REPLACE_WITH_ECR_FRONTEND
+    digest: REPLACE_WITH_IMAGE_DIGEST
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 60
+
+ingress:
+  enabled: true
+  host: bank.example.com
+
+```
+
+These are illustrative Helm values. Templates must be written to consume them.
+
+### 16.3 Helm commands
+
+```
+helm lint ./helm/banking
+
+helm template banking ./helm/banking \
+  -f ./helm/banking/values-prod.yaml
+
+helm upgrade --install banking ./helm/banking \
+  --namespace banking \
+  --create-namespace \
+  -f ./helm/banking/values-dev.yaml
+```
+
+The final command is appropriate for a controlled development lab. In the GitOps production model, Argo CD should manage the application's Helm release rather than engineers making routine manual changes directly in the cluster.
+
+Interview question: What is the difference between Helm and Argo CD?
+
+Answer: Helm packages and templates Kubernetes resources. Argo CD continuously reconciles the cluster with the desired state stored in Git. Argo CD can deploy Helm charts.
+
+## 17. Phase 13 — Argo CD and GitOps
+
+[GitOps on Kubernetes with ArgoCD. Implementing declarative, automated… | by Jakub Jakubowski | Apr, 2026 | Medium](https://images.openai.com/static-rsc-4/wweamSkSnYizZXbTMefdUqb5h8jFofJg4miKnBGMsvxhwjCWeb_UxtyH7k-Iw1GQsgHfbMIIlGZ_ULur9l3GAN2z8vt1RxYIMzkIkzS9lOE4BTwTJ0TsHVYY_AwcntK4_d7F4i5fsBgGDiNv9YzgOI18GGdYSxt8ahe0_NOn0cg?purpose=inline)
+
+[Enhance Kubernetes deployment efficiency with Argo CD and ApplicationSet | Red Hat Developer](https://images.openai.com/static-rsc-4/ugKGXT13V4gYqIoncZEOB1ix3UK-2zig90Bscyv5588dSjfLEaqpIksuEfHhw64zvaHRzVGECMpaO71E6g3zd6EFDYNipkhAjRPOY41aXLYlGrjBqj8SizG5EDL1Tw6OXK81BbTX11Yk1sxoQx_KJ9H-sTmKRb2agWbav37qWXA?purpose=inline)
+
+[How to Set Up GitOps with ArgoCD on Kubernetes — Even If You’ve Never Heard of GitOps (2026) | by AbdulRahman Mostafa | Apr, 2026 | Medium](https://images.openai.com/static-rsc-4/S2V5oqvOkCCQVEJIsFzstDmRVlM7qnWeUocigNOhVp0nK1Ix7yJZ-DtJs_tZxLPI9OkLObWE6VEuXw6Pn2STVwZHp8xG5Ui_JmITSoQfknklZt4m0gL301P3dlf1rgeM3iNC-mcibF7n1RI4HF3CCc7Slk2_eLbGnlGEw8z46Hc?purpose=inline)
+
+7
+
+### 17.1 Why GitOps?
+
+In a traditional pipeline, GitHub Actions may directly execute:
+
+```
+kubectl apply -f deployment.yaml
+```
+
+In a GitOps model, the pipeline builds and publishes an artifact, then updates a Git repository containing the desired deployment configuration.
+
+Argo CD detects the Git change and reconciles Kubernetes resources.
+
+This separates image-building permissions from Kubernetes deployment permissions.
+
+### 17.2 Recommended repository separation
+
+```
+jumptotech-digital-banking-batch5/
+├── backend/
+├── frontend/
+├── .github/workflows/
+└── docs/
+
+jumptotech-banking-gitops/
+├── applications/
+│   ├── dev/
+│   ├── staging/
+│   └── prod/
+├── helm/
+└── environments/
+```
+
+The application repository owns source code, tests and image builds. The GitOps repository owns deployment configuration.
+
+### 17.3 Example Argo CD Application
+
+```
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: banking-dev
+  namespace: argocd
+spec:
+  project: banking
+  source:
+    repoURL: https://github.com/jumptotechschooldevops/jumptotech-banking-gitops.git
+    targetRevision: main
+    path: helm/banking
+    helm:
+      valueFiles:
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: banking-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+```
+
+This example assumes the GitOps repository, Helm chart and Argo CD AppProject have been created. It is a proposed configuration.
+
+For production, use a protected GitOps revision and carefully control automated pruning and self-healing. Production promotion may require a reviewed pull request and a manual synchronization approval.
+
+### 17.4 Argo CD states
+
+Synced: The desired Kubernetes configuration matches the Git source.
+
+OutOfSync: The live configuration differs from Git.
+
+Healthy: The application's health assessments indicate expected operational status.
+
+Degraded: One or more resources are unhealthy.
+
+An application can be Synced but unhealthy. Git configuration agreement does not guarantee business functionality.
+
+### 17.5 Rollback strategy
+
+For a failed application release:
+
+1. Identify the deployed image digest and GitOps commit.
+2. Evaluate whether the problem is code, configuration, infrastructure or database-related.
+3. Revert or promote a previously tested deployment configuration.
+4. Allow Argo CD to reconcile.
+5. Verify application health, transaction correctness and monitoring.
+
+Database migrations require special attention because rolling back application code does not automatically reverse schema or data changes.
+
+## 18. Phase 14 — Autoscaling, high availability and resilience
+
+### 18.1 Horizontal Pod Autoscaler
+
+HPA adjusts the desired number of application replicas based on supported metrics.
+
+Example:
+
+```
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: banking-backend-hpa
+  namespace: banking
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: banking-backend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+
+```
+
+CPU-based HPA requires usable CPU requests and a working metrics pipeline.
+
+For banking workloads, CPU alone may not represent capacity. Database connections, request latency, queue depth and transaction throughput may be more meaningful scaling signals.
+
+### 18.2 HPA versus node autoscaling
+
+HPA scales application replicas.
+
+Node autoscaling adds or removes cluster compute capacity.
+
+If HPA creates additional Pods but no node has sufficient capacity, those Pods may remain Pending until capacity becomes available.
+
+### 18.3 PodDisruptionBudget
+
+A PDB helps protect a minimum number of available Pods during voluntary disruptions, such as controlled node draining.
+
+It does not prevent all failures or guarantee availability during an unplanned outage.
+
+### 18.4 Availability Zone resilience
+
+Spread application replicas across Availability Zones using topology spread constraints and appropriate node placement.
+
+Test the loss of a node and the loss of an Availability Zone in a controlled environment. Observe Pod rescheduling, ingress behavior, database failover and recovery time.
+
+## 19. Phase 15 — Production monitoring with Prometheus and Grafana
+
+[A set of modern Grafana dashboards for Kubernetes | by David Calvert | Medium](https://images.openai.com/static-rsc-4/lqgn2D28Y4wAWzfnvdysi-iOCXpT0QPPOfkH3UGG800MJz-SwmAXpV4Dxn-Lek597zyrs7np803muBaSwxkm0haE5s7sS91z2dABhUohZxC-07h3z3G991Iq5vKPbMSDwUnuOxbPLCp2PPeW4JJ_pc91fmVuUMLjp9Zwq7t524A?purpose=inline)
+
+[Prometheus Operator 簡介 - Tech Learning](https://images.openai.com/static-rsc-4/lxrJ7Mx_YnkZqrBIJKi9bWFdxKFA26zSa3ygbLLexjrYd1J0ubpSEn7XweHnVTK8-jRxqB7BnlXOC8GsCMwQ6-YyYJw0uXIqJReHd-dzC-dMR2F5H9WUTH11SYEnHgr0qu0KaSwFy4jYCWlJpjOPpM9uhT8SehX9WDpyTvoLA7g?purpose=inline)
+
+[Kubernetes / Views / Nodes | Grafana Labs](https://images.openai.com/static-rsc-4/pu6749sI3oTqMMWZvYorOOcvjbT6y__K4XB_G1f29Y7Ws9UDur8A943fLqHyWKoX4F9dydxhuN9qFm0dJuePz7EcFcFHft0-2ivJXcdoD18CYDJJsxUoc2oHBbwIswMBMachB4yE-HVqfLqqI2Qz9jKkeS9kSdnKzY6RjaClPQ0?purpose=inline)
+
+7
+
+A production-style banking platform needs monitoring at multiple layers.
+
+| Layer          | Important metrics                                |
+| -------------- | ------------------------------------------------ |
+| Infrastructure | Node CPU, memory, disk, network                  |
+| Kubernetes     | Pod restarts, unavailable replicas, pending Pods |
+| Application    | HTTP errors, latency, throughput                 |
+| Database       | Connections, locks, replication lag, storage     |
+| Business       | Transfer success/failure, duplicate prevention   |
+| Security       | Authentication failures, access anomalies        |
+| Delivery       | Deployment failures, rollback frequency          |
+
+### 19.1 Essential PromQL examples
+
+Unavailable Deployment replicas
+
+```
+kube_deployment_status_replicas_unavailable{
+  namespace="banking"
+}
+```
+
+Container restarts over one hour
+
+```
+sum by (namespace, pod) (
+  increase(
+    kube_pod_container_status_restarts_total{
+      namespace="banking"
+    }[1h]
+  )
+)
+```
+
+Backend HTTP 5xx error rate
+
+```
+sum(rate(
+  http_server_requests_seconds_count{
+    namespace="banking",
+    status=~"5.."
+  }[5m]
+))
+```
+
+The HTTP metric example assumes the application exports Micrometer metrics with the relevant labels. Confirm actual labels in Prometheus before using it.
+
+95th percentile request latency
+
+```
+histogram_quantile(
+  0.95,
+  sum by (le) (
+    rate(
+      http_server_requests_seconds_bucket{
+        namespace="banking"
+      }[5m]
+    )
+  )
+)
+```
+
+This requires a compatible histogram metric with bucket data.
+
+### 19.2 Grafana dashboards
+
+Students should build dashboards covering:
+
+1. Kubernetes cluster health.
+2. Banking backend availability.
+3. API latency and error rates.
+4. PostgreSQL connections and performance.
+5. Transaction outcomes and idempotency failures.
+6. Deployment health and rollback events.
+7. Security and authentication anomalies.
+
+Use application-level metrics without exposing customer identifiers, account numbers, secrets or other sensitive financial information.
+
+### 19.3 Alerting and incident response
+
+A useful alert is actionable. It identifies a symptom, severity, affected service and runbook.
+
+Example alert:
+
+```
+kube_deployment_status_replicas_unavailable{
+  namespace="banking",
+  deployment="banking-backend"
+} > 0
+```
+
+This expression alone is not a complete production alert. Add a suitable evaluation duration, labels, annotations, routing and runbook link.
+
+For a banking service, prioritize user-impacting symptoms such as elevated transfer failures, sustained API 5xx rates and abnormal latency, rather than paging for every isolated Pod restart.
+
+Alerts can route through Grafana Alerting or Alertmanager to PagerDuty and approved notification channels.
+
+## 20. Phase 16 — Production banking security
+
+Security is not a single Trivy step. It is a set of controls across the entire delivery and runtime lifecycle.
+
+| Security layer   | Required engineering controls                               |
+| ---------------- | ----------------------------------------------------------- |
+| Source code      | Reviews, branch protection, secret scanning                 |
+| CI/CD            | OIDC, least-privilege runners, pinned actions               |
+| Container images | Minimal images, non-root, scanning, signing                 |
+| Registry         | Private ECR, restricted push/pull, retention                |
+| Kubernetes       | RBAC, Pod Security Standards, workload isolation            |
+| Networking       | Private subnets, WAF, TLS, Security Groups, NetworkPolicies |
+| Secrets          | AWS Secrets Manager, KMS, rotation, controlled access       |
+| Database         | TLS, encryption, least-privilege DB roles, auditing         |
+| Identity         | MFA, session protection, account authorization              |
+| Monitoring       | Audit logs, threat detection, anomaly alerting              |
+| Recovery         | Encrypted backups, restore testing, incident plans          |
+
+### 20.1 Secrets management
+
+Do not put database passwords into Helm values or Git.
+
+For the lab, integrate AWS Secrets Manager with a supported Kubernetes secret synchronization mechanism such as External Secrets Operator, or use an appropriate Secrets Store CSI design.
+
+Kubernetes Secrets are not automatically equivalent to a dedicated secrets manager. Their storage, access, rotation and exposure must be controlled.
+
+### 20.2 Application security
+
+Because this is a banking-style system, students should also discuss:
+
+- Secure password storage and MFA.
+- Authentication and session expiration.
+- CSRF and XSS protection.
+- Object-level authorization.
+- Rate limiting.
+- Secure API input validation.
+- Transaction limits and fraud controls.
+- Immutable or tamper-evident audit records.
+- Separation of duties.
+- Sensitive-data minimization.
+
+A DevOps Engineer helps provide the infrastructure controls and delivery checks. Backend and security teams own much of the application-specific implementation.
+
+### 20.3 Supply-chain security
+
+An advanced version of the lab should generate an SBOM, sign container images and verify provenance before deployment.
+
+For production, image scanning should cover the actual built container image, not only `pom.xml` and `package-lock.json`.
+
+## 21. Phase 17 — On-call incident simulation
+
+### Incident: Midnight banking transfer failures
+
+SEV-1 simulation
+
+02:15 AM · Production-like staging environment
+
+Grafana reports elevated HTTP 503 responses from the banking API.
+
+The Kubernetes dashboard shows that all backend Pods are Running and Ready.
+
+Customers cannot complete transfers.
+
+### What does the on-call DevOps/SRE Engineer do?
+
+1. Acknowledge the incident
+
+   Confirm the alert, determine impact and notify the Incident Commander according to the escalation policy.
+2. Check recent changes
+
+   Examine Argo CD deployment history, GitHub Actions, configuration changes, database events and network-policy updates.
+3. Verify application symptoms
+
+   Review HTTP status rates, application logs, transfer failure metrics and request latency.
+4. Investigate Kubernetes
+
+   Check Deployments, Pods, Services, EndpointSlices, DNS and recent events.
+5. Investigate database connectivity
+
+   Coordinate with the DBA to check RDS/Aurora availability, connections, locks, failover events and database-side errors.
+6. Restore service safely
+
+   If a recently introduced NetworkPolicy caused the failure, revert the reviewed GitOps change or apply the authorized emergency recovery procedure.
+7. Validate transaction integrity
+
+   Confirm that failed or retried transfers did not create duplicate ledger entries or inconsistent balances.
+8. Conduct a post-incident review
+
+   Document the timeline, customer impact, root cause, contributing factors and prevention measures.
+
+### Useful investigation commands
+
+```
+kubectl get pods -n banking -o wide
+
+kubectl get deploy,svc,endpointslice -n banking
+
+kubectl get networkpolicy -n banking
+
+kubectl describe deploy banking-backend -n banking
+
+kubectl logs deployment/banking-backend \
+  -n banking --since=20m --all-containers=true
+
+kubectl get events -n banking \
+  --sort-by=.lastTimestamp
+
+kubectl rollout history deployment/banking-backend \
+  -n banking
+```
+
+The incident should also demonstrate the difference between:
+
+- 502 Bad Gateway: A gateway received an invalid response from an upstream.
+- 503 Service Unavailable: A service or intermediary cannot currently serve the request.
+- 504 Gateway Timeout: A gateway did not receive a timely upstream response.
+
+These statuses suggest different investigations, but their exact meaning depends on which component generated them.
+
+### Incident team responsibilities
+
+The Incident Commander coordinates response. The SRE or DevOps on-call investigates infrastructure and routing. Backend engineers examine application behavior. The DBA investigates database health. Security joins when compromise or suspicious activity is suspected.
+
+In banking, restoration must not sacrifice transaction correctness. Never blindly retry non-idempotent transfer requests.
+
+## 22. Phase 18 — Production interview questions and answers
+
+These questions cover the major topics students should be able to explain after completing the lab.
+
+Interview question bank
+
+27 questions
+
+Choose a topicCI/CD and Docker
+
+What happens after a developer pushes code?
+
+Why use multi-stage Docker builds?
+
+Why use immutable image digests?
+
+What is the difference between CI, continuous delivery and continuous deployment?
+
+Show all answersHide answers
+
+## 23. Student implementation roadmap
+
+This capstone is best delivered as a multi-week project rather than one enormous deployment exercise.
+
+8-week capstone checklist
+
+0 / 8 complete
+
+Week 1 — Banking application and local development
+
+Run backend, frontend and PostgreSQL; validate transfers and test suite
+
+Week 2 — Docker and GitHub Actions
+
+Build images; configure tests, Trivy and secure CI
+
+Week 3 — AWS infrastructure and OIDC
+
+Terraform VPC, ECR, IAM roles and secure publishing
+
+Week 4 — EKS and Kubernetes fundamentals
+
+Deploy application, Services, probes, ingress and replicas
+
+Week 5 — Helm and Argo CD
+
+Create Helm chart, GitOps repository and environment promotion
+
+Week 6 — Kubernetes security and stateful workloads
+
+NetworkPolicy, RBAC, DaemonSet, StatefulSet, EBS CSI
+
+Week 7 — RDS/Aurora and database operations
+
+Private connectivity, migration, backups, failover and recovery
+
+Week 8 — Monitoring, scaling and incidents
+
+Prometheus, Grafana, HPA, PagerDuty and SEV-1 simulation
+
+### Final student deliverables
+
+Each student team should submit a GitHub application repository, a Terraform infrastructure repository, a GitOps repository, working Docker images in ECR, Helm charts, Kubernetes manifests, security policies, test results, an architecture diagram, Grafana dashboards, an incident runbook and a written post-incident report.
+
+For the final demonstration, the team should deploy a new banking application version, verify a successful transfer, intentionally introduce a controlled failure in a nonproduction environment, detect it through monitoring, restore service and explain what happened.
+
+The evaluation should measure both technical correctness and the team's ability to communicate engineering decisions.
+
+## 24. How to describe this project in a DevOps interview
+
+**Project: Production-Style Digital Banking Platform on AWS and Kubernetes**
+
+I worked on an end-to-end digital banking platform built with Java Spring Boot, React and PostgreSQL. The platform supported customer authentication, account management, banking transfers, transaction history and administrative functionality.
+
+My DevOps responsibilities included designing the CI/CD architecture, containerizing the application, integrating security scanning, configuring AWS ECR publishing and establishing the target Kubernetes deployment architecture.
+
+We used GitHub Actions to automate backend integration tests with PostgreSQL Testcontainers, frontend tests and vulnerability scanning with Trivy. We integrated GitHub Actions with AWS using OpenID Connect and IAM roles rather than storing long-lived AWS access keys.
+
+One issue we encountered was an AWS STS authentication failure caused by a mismatch between the GitHub OIDC token subject and the IAM role trust policy. We investigated the token claims, identified the mismatch and corrected the trust configuration.
+
+The broader production-style architecture uses Amazon EKS, Helm, Argo CD, Kubernetes Deployments and Services, ingress routing, RBAC, NetworkPolicies and managed PostgreSQL through RDS or Aurora. It also incorporates monitoring, alerting, autoscaling, backup planning and incident response.
+
+The project demonstrates how DevOps, backend, frontend, security, database and SRE teams collaborate to deliver reliable and secure applications.
+
+**Note:** When presenting this project, I distinguish the components we implemented and tested from the extended production architecture we designed for the lab.
+
+## 25. What makes this a strong banking DevOps capstone?
+
+The value of this project is not simply that it uses Docker, Kubernetes, Terraform and AWS. It is that students learn how these technologies interact when something goes wrong.
+
+They learn why an application can pass local tests but fail in CI; why a GitHub workflow can have valid YAML but insufficient AWS permissions; why a Pod can be Ready while the API is unavailable; why database availability is different from transaction correctness; and why a production release requires more than a successful image build.
+
+The end goal is for every JumpToTech student to be able to explain the complete path from a developer's Git commit to a secure, observable and recoverable banking application—and demonstrate it through a working lab.
+
+This is the architectural and teaching foundation. The next implementation deliverable should be a version-controlled lab repository with executable Terraform modules, Helm templates, Argo CD Applications, Kubernetes policies, observability configurations and verified commands. The examples above are a reference design, not a substitute for deploying and validating those resources together.

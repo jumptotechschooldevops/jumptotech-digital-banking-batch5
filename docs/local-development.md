@@ -37,15 +37,63 @@ All 46 backend tests, all 13 frontend tests, the production build, and the
 Playwright end-to-end test were re-run after these changes and still pass.
 `npm audit` now reports **0 vulnerabilities**.
 
-**Not fixed (backend, out of scope for this pass):** `trivy fs backend`
-reports 53 CRITICAL/HIGH findings, all transitive dependencies of Spring Boot
-3.3.4 (Tomcat, Spring Framework, Spring Security, Jackson, BouncyCastle,
-the PostgreSQL driver). These predate the dependency-audit work above and
-need their own upgrade-and-retest pass (likely Spring Boot 3.3.4 -> 3.5.x) -
-tracked as remaining work, not silently ignored. `.github/workflows/ci.yml`
-scans both stacks on every run: the frontend scan blocks the build, the
-backend scan is `continue-on-error` (reports to the Security tab, doesn't
-fail CI yet) until that upgrade happens.
+**Backend (fixed in a follow-up pass):** the `trivy fs backend` scan used to
+report 53 CRITICAL/HIGH findings against Spring Boot 3.3.4 (Tomcat, Spring
+Framework, Spring Security, Jackson, BouncyCastle, the PostgreSQL driver).
+Spring Boot 3.3.4 - and every other 3.x line, including the 3.5 bridge
+release - is now past open-source end-of-life, so the fix was a major-version
+upgrade rather than a patch bump: `spring-boot-starter-parent` 3.3.4 ->
+**4.1.2** (the current OSS-supported line; 4.0.x is also still supported but
+exits support at the end of 2026, so 4.1 was the better target). Notable
+changes that came with it:
+
+- **Jackson 3** is now the default (`tools.jackson.*`, not `com.fasterxml.jackson.*`
+  `ObjectMapper`/`JsonNode`) - the handful of call sites in
+  `SecurityConfig`, `TransferExecutionService`, `TransferServiceImpl`, and a
+  few tests were repointed at the new package. `JavaTimeModule` registration
+  was dropped from the one test that did it manually - Jackson 3's
+  `jackson-databind` has `java.time` support built in.
+- `spring-boot-starter-web` -> `spring-boot-starter-webmvc` (starter rename).
+- Flyway now needs the dedicated `spring-boot-starter-flyway` starter rather
+  than a bare `flyway-core` dependency, or its autoconfiguration never fires
+  (migrations silently don't run).
+- Testcontainers' Spring Boot-managed version jumped to 2.0.5, which renamed
+  the `org.testcontainers:junit-jupiter`/`postgresql` artifacts to
+  `testcontainers-junit-jupiter`/`testcontainers-postgresql`.
+- `TestRestTemplate`/`RestTemplateBuilder` moved out of
+  `spring-boot-starter-test` into new `spring-boot-resttestclient`/
+  `spring-boot-restclient` artifacts, and `@SpringBootTest` no longer
+  auto-configures `TestRestTemplate` - `AbstractIntegrationTest` now carries
+  `@AutoConfigureTestRestTemplate`. The new `TestRestTemplate` also manages
+  its own cookie jar by default (so it behaves like one shared browser
+  session) - that collided with this test base's own per-`Session` cookie
+  jars (used to simulate several independent concurrent sessions), bleeding
+  one session's CSRF cookie into another's requests and producing
+  intermittent 401/403s that only showed up when more than one test ran in
+  the same class. Fixed by disabling the client's cookie handling
+  (`TestRestTemplate.withCookieHandling(HttpCookieHandling.DISABLE)`) so the
+  test's own cookie jars are the only ones in play.
+- `@MockBean` is gone - replaced with `@MockitoBean`.
+- `HttpStatus.UNPROCESSABLE_ENTITY` is superseded by
+  `HttpStatus.UNPROCESSABLE_CONTENT` (IANA renamed 422's reason phrase); the
+  numeric code is unchanged, but the two are different enum constants, so
+  both the exceptions that set this status and the tests asserting on it
+  were updated together.
+- BouncyCastle (`bcprov-jdk18on`) bumped 1.78.1 -> 1.86 - not managed by the
+  Spring Boot BOM, so it needs tracking on its own.
+
+All 46 backend tests pass against the upgraded stack, verified both with the
+locally-installed JDK 25 (`--release 21` cross-compilation) and with a real
+JDK 21 (Temurin) to match what CI runs.
+
+`trivy fs backend` (equivalently, scanning the built fat jar's 88 resolved
+runtime jars with `trivy rootfs`) now reports **0 CRITICAL/HIGH findings**.
+`.github/workflows/ci.yml` scans both stacks on every run and now **blocks
+the build on either one** - the backend scan's `continue-on-error` exemption
+has been removed now that it is clean. A documented, reviewed exception can
+still be recorded per-stack in `backend/.trivyignore` /
+`frontend/.trivyignore` (see the comments in those files for the required
+fields) without having to touch the workflow itself.
 
 ## Prerequisites (verified on this machine)
 
