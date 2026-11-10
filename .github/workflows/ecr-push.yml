@@ -2,53 +2,91 @@
 name: Build and Push Docker Images to ECR
 
 on:
-  workflow_dispatch:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-    branches: [main]
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
+  actions: read
   id-token: write
+
+concurrency:
+  group: ecr-publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish:
-    name: Build and Push to Amazon ECR
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
-    runs-on: ubuntu-latest
+    name: Build and Push to AWS ECR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     steps:
-      - name: Checkout source code
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          persist-credentials: false
 
-      - name: Configure AWS credentials using OIDC
+      - name: Wait for successful CI on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 60); do
+            result=$(gh api \
+              "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&per_page=20" \
+              --jq '[.workflow_runs[] |
+                select(.head_sha == env.SHA)] |
+                sort_by(.created_at) | last |
+                [.status, .conclusion] | @tsv')
+
+            status=$(echo "$result" | cut -f1)
+            conclusion=$(echo "$result" | cut -f2)
+
+            if [ "$status" = "completed" ]; then
+              if [ "$conclusion" = "success" ]; then
+                echo "CI passed."
+                exit 0
+              fi
+              echo "CI did not pass: $conclusion"
+              exit 1
+            fi
+
+            echo "Waiting for CI: attempt $attempt"
+            sleep 20
+          done
+
+          echo "Timed out waiting for CI."
+          exit 1
+
+      - name: Verify Dockerfiles exist
+        run: |
+          test -f backend/Dockerfile
+          test -f frontend/Dockerfile
+
+      - name: Configure AWS credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::668484272259:role/JumpToTech-Banking-ECR-Push-Policy
           aws-region: us-east-2
+          role-session-name: GitHubActionsECRPush
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
       - name: Login to Amazon ECR
-        id: login-ecr
+        id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set image tag
         id: image
-        run: |
-          echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push backend image
+      - name: Build and push backend
         uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -56,10 +94,10 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-backend:${{ steps.image.outputs.tag }}
-            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-backend:latest
+            ${{ steps.ecr.outputs.registry }}/jumptotech-banking-backend:${{ steps.image.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/jumptotech-banking-backend:latest
 
-      - name: Build and push frontend image
+      - name: Build and push frontend
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -67,13 +105,6 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-frontend:${{ steps.image.outputs.tag }}
-            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-frontend:latest
-
-      - name: Print published image URIs
-        run: |
-          echo "Backend image:"
-          echo "${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-backend:${{ steps.image.outputs.tag }}"
-          echo "Frontend image:"
-          echo "${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-frontend:${{ steps.image.outputs.tag }}"
+            ${{ steps.ecr.outputs.registry }}/jumptotech-banking-frontend:${{ steps.image.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/jumptotech-banking-frontend:latest
 
