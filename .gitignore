@@ -2,6 +2,25 @@
 .env
 *.env.local
 
+# Credentials and key material - should never be generated in-repo, but
+# excluded defensively in case a tool ever drops one here by mistake
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*credentials*.json
+*secrets*.yml
+*secrets*.yaml
+
+# Local database data (e.g. a future docker-compose Postgres volume) -
+# nothing lives here yet since Postgres runs via Homebrew outside the repo,
+# but excluded ahead of the Docker phase so a bind-mounted volume never
+# accidentally gets committed
+pgdata/
+**/pgdata/
+*.dump
+
 # Backend (Maven / Java)
 backend/target/
 backend/.mvn/wrapper/maven-wrapper.jar

@@ -1,0 +1,79 @@
+
+name: Build and Push Docker Images to ECR
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build and Push to Amazon ECR
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::668484272259:role/JumpToTech-Banking-ECR-Push-Policy
+          aws-region: us-east-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: image
+        run: |
+          echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-backend:${{ steps.image.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-backend:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-frontend:${{ steps.image.outputs.tag }}
+            ${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-frontend:latest
+
+      - name: Print published image URIs
+        run: |
+          echo "Backend image:"
+          echo "${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-backend:${{ steps.image.outputs.tag }}"
+          echo "Frontend image:"
+          echo "${{ steps.login-ecr.outputs.registry }}/jumptotech-banking-frontend:${{ steps.image.outputs.tag }}"
+

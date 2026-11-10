@@ -11,7 +11,7 @@ export function renderWithProviders(ui: ReactElement, { route = "/" }: { route?:
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[route]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter initialEntries={[route]}>
         <AuthProvider>{ui}</AuthProvider>
       </MemoryRouter>
     </QueryClientProvider>,

@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege by default: every job can read the repo and nothing else.
+# Individual jobs elevate only the specific permission they need (see the
+# trivy job, which needs security-events: write to upload its SARIF report).
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (Maven + Testcontainers/PostgreSQL)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Verify Docker is available for Testcontainers
+        run: docker info
+
+      - name: Run backend test suite
+        working-directory: backend
+        run: ./mvnw --batch-mode --no-transfer-progress test
+
+      - name: Upload Surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-surefire-reports
+          path: backend/target/surefire-reports
+          retention-days: 7
+
+  frontend:
+    name: Frontend (lint, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Unit tests (Vitest)
+        working-directory: frontend
+        run: npm run test
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Audit dependencies
+        working-directory: frontend
+        # Informational: fails the step (not the whole job) only on high/critical findings,
+        # so a new transitive advisory doesn't block merges without anyone noticing it first.
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  trivy:
+    name: Trivy vulnerability scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # required only for uploading the SARIF reports below
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Split into two scans rather than one repo-wide scan so each stack's gate
+      # reflects its own actual state. The frontend lockfile is clean as of the
+      # dependency fixes in this change, so it blocks the build on a regression.
+      # The backend's Spring Boot 3.3.4 dependency tree has pre-existing CRITICAL/HIGH
+      # CVEs (Tomcat, Spring Framework/Security, Jackson, BouncyCastle) that predate
+      # this change and were not part of its scope - see docs for the remediation plan.
+      # It still runs and uploads findings to the Security tab, just doesn't fail the
+      # build yet, so those CVEs stay visible without blocking unrelated PRs.
+      - name: Scan frontend dependencies (blocking)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: frontend
+          format: sarif
+          output: trivy-frontend.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - name: Scan backend dependencies (report only - see docs/local-development.md)
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        continue-on-error: true
+        with:
+          scan-type: fs
+          scan-ref: backend
+          format: sarif
+          output: trivy-backend.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - name: Upload frontend Trivy results to the Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
+
+      - name: Upload backend Trivy results to the Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend

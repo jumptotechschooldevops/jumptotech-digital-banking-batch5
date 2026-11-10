@@ -10,6 +10,43 @@ servers up. Stage 5 (the complete, final test-suite pass with everything
 documented together) is still to come, though both suites already pass
 individually as part of Stage 4's verification.
 
+## Dependency security status
+
+An `npm audit` pass found 15 frontend vulnerabilities (11 moderate, 2 high, 2
+critical). Fixed without unnecessary breaking changes:
+
+- `minimatch` (moderate, ReDoS) - forced to `^11.0.5` via a package.json
+  `overrides` entry, with no change to `@typescript-eslint`'s version; the
+  CJS/ESM compatibility was checked first since a minimatch major jump has
+  dropped CJS support before.
+- `react-router-dom` 6.x (moderate, open redirect in `<Link>`/`useNavigate` -
+  a phishing-relevant bug for a banking app) - upgraded to `^7.18.5`. The only
+  code change needed was removing the `future` flags from `<BrowserRouter>`/
+  `<MemoryRouter>`, since v7 made that behavior the permanent default.
+- `zod` (high, memory-exhaustion DoS) - upgraded to `^4.6.7` along with
+  `@hookform/resolvers` to `^7.0.5` (the version that added zod v4 support).
+  No schema code changes were needed.
+- `esbuild`/`vite` (moderate/high, dev-server request handling) - upgraded
+  `vite` to `^6.4.6` and `@vitejs/plugin-react` to `^5.2.0`.
+- `tinypool`/`@vitest/mocker`/`vite-node` (critical/moderate, prototype
+  pollution and path traversal in the test runner) - upgraded `vitest` to
+  `^5.1.0`, which was a much smaller change than it first looked once `vite`
+  was already at 6.x (vitest 5's peer range accepts it directly).
+
+All 46 backend tests, all 13 frontend tests, the production build, and the
+Playwright end-to-end test were re-run after these changes and still pass.
+`npm audit` now reports **0 vulnerabilities**.
+
+**Not fixed (backend, out of scope for this pass):** `trivy fs backend`
+reports 53 CRITICAL/HIGH findings, all transitive dependencies of Spring Boot
+3.3.4 (Tomcat, Spring Framework, Spring Security, Jackson, BouncyCastle,
+the PostgreSQL driver). These predate the dependency-audit work above and
+need their own upgrade-and-retest pass (likely Spring Boot 3.3.4 -> 3.5.x) -
+tracked as remaining work, not silently ignored. `.github/workflows/ci.yml`
+scans both stacks on every run: the frontend scan blocks the build, the
+backend scan is `continue-on-error` (reports to the Security tab, doesn't
+fail CI yet) until that upgrade happens.
+
 ## Prerequisites (verified on this machine)
 
 | Tool        | Required | Found                                           |
